@@ -29,9 +29,16 @@ limitations under the License.
 #include "tensorflow/lite/micro/micro_mutable_op_resolver.h"
 #include "tensorflow/lite/schema/schema_generated.h"
 #include "tensorflow/lite/version.h"
+#include <numeric>
 
+
+#define WIDTH 96
+#define HEIGHT 96
 
 unsigned long start_time;
+uint8_t pixel_averages[10*10] = {0};
+uint8_t arrays[10*10][10*10] = {0};
+
 
 // Globals, used for compatibility with Arduino-style sketches.
 namespace {
@@ -123,6 +130,49 @@ void setup() {
   // Get information about the memory area to use for the model's input.
   input = interpreter->input(0);
 }
+
+
+std::vector<std::pair<int, int> > detect_motion(camera_fb_t *frame_buffer)
+{
+    std::vector<std::pair<int, int>> movements;
+
+    size_t windowSize = 10;
+
+
+    size_t hCount = (WIDTH-1) / windowSize + 1;
+    size_t vCount = (HEIGHT-1) / windowSize + 1;
+
+
+    int sizes [10*10] = {0};
+
+    for (uint32_t j = 0; j < (HEIGHT * WIDTH); j++){
+        uint8_t b  = j / WIDTH / windowSize * hCount + j % WIDTH / windowSize;
+
+        arrays[b][sizes[b]] = frame_buffer->buf[j];
+
+        sizes[b] = sizes[b] + 1;
+    }
+
+
+    for (int j = 0; j < hCount*vCount; j++){
+        int sum = 0;
+        for(int i = 0; i < sizes[j]; i++){
+            sum += arrays[j][i];
+        }
+        int avg = sum / sizes[j];
+
+        if (std::abs(pixel_averages[j] - avg) > 5){
+            //Serial.printf("change in %d %d \n", j / hCount, j % vCount);
+
+            movements.push_back(std::make_pair(j / hCount, j - int(j / hCount) * hCount))
+        }
+
+        pixel_averages[j] = avg;
+    }
+
+    return movements;
+}
+
 
 // The name of this function is important for Arduino compatibility.
 void loop() {
