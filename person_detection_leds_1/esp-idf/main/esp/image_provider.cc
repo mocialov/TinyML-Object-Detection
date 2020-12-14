@@ -27,9 +27,67 @@ limitations under the License.
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include <numeric>
+#include <vector>
+
+//BOF for motion detection
+#define WIDTH 96
+#define HEIGHT 96
+#define WINDOW_SIZE 10
+//hCount = (WIDTH-1) // WINDOW_SIZE + 1
+//vCount = (HEIGHT-1) // WINDOW_SIZE + 1
+#define HCOUNT 10
+#define VCOUNT 10
+#define MOVEMENT_THRESHOLD 5
+
+uint8_t pixel_averages[HCOUNT*VCOUNT] = {0};
+uint8_t arrays[HCOUNT*VCOUNT][WINDOW_SIZE*WINDOW_SIZE] = {0};
+//EOF for motion detection
 
 camera_fb_t* fb = NULL;
 static const char* TAG = "app_camera";
+
+
+//outputs a list of x,y pairs where the motion is happening
+//x,y starting from the top left corner, I think
+//compares to the previous image, not some static image taken in the beginning
+std::vector<std::pair<int, int> > detect_motion(camera_fb_t *frame_buffer){
+    std::vector<std::pair<int, int>> movements;
+
+    //size_t hCount = (WIDTH-1) / WINDOW_SIZE + 1;
+    //size_t vCount = (HEIGHT-1) / WINDOW_SIZE + 1;
+
+    int sizes [HCOUNT*VCOUNT] = {0};
+
+
+    for (uint32_t j = 0; j < (HEIGHT * WIDTH); j++){
+        uint8_t b  = j / WIDTH / WINDOW_SIZE * HCOUNT + j % WIDTH / WINDOW_SIZE;
+
+        arrays[b][sizes[b]] = frame_buffer->buf[j];
+
+        sizes[b] = sizes[b] + 1;
+    }
+
+
+    for (uint32_t j = 0; j < HCOUNT*VCOUNT; j++){
+        uint32_t sum = 0;
+        for(uint32_t i = 0; i < sizes[j]; i++){
+            sum += arrays[j][i];
+        }
+        int avg = sum / sizes[j];
+
+        if (std::abs(pixel_averages[j] - avg) > MOVEMENT_THRESHOLD){
+            //Serial.printf("change in %d %d \n", j / hCount, j % vCount);
+
+            movements.push_back(std::make_pair(j / HCOUNT, j - int(j / HCOUNT) * HCOUNT));
+        }
+
+        pixel_averages[j] = avg;
+    }
+
+    return movements;
+}
+
 
 // Get the camera module ready
 TfLiteStatus InitCamera(tflite::ErrorReporter* error_reporter) {
